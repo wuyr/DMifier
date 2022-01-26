@@ -1,0 +1,39 @@
+<idea-plugin>
+    <id>com.wuyr.dmifier</id>
+    <name>DMifier</name>
+    <version>0.1</version>
+    <vendor email="ifxcyr@gmail.com" url="https://www.github.com/wuyr">陈小缘</vendor>
+
+    <description><![CDATA[
+        <p>适用于Android项目的IDEA插件，用来自动生成DexMaker代码，类似『ASM Bytecode Viewer』</p>
+        <br/>
+    ]]></description>
+
+    <change-notes><![CDATA[
+      <p><li><strong>0.1 </strong>功能完善中</li></p>
+      <br>
+    ]]>
+    </change-notes>
+
+    <!-- please see https://plugins.jetbrains.com/docs/intellij/build-number-ranges.html for description -->
+    <idea-version since-build="193.5233.102"/>
+
+    <!-- please see https://plugins.jetbrains.com/docs/intellij/plugin-compatibility.html
+         on how to target different products -->
+    <depends>com.intellij.modules.platform</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <!-- Add your extensions here -->
+    </extensions>
+
+    <actions>
+        <action id="com.wuyr.dmifier.actions.ViewCodeAction"
+                class="com.wuyr.dmifier.actions.ViewCodeAction"
+                text="View DexMaker Code"
+                description="Generate and view DexMaker code">
+            <add-to-group group-id="ViewMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+        </action>
+    </actions>
+
+</idea-plugin>
