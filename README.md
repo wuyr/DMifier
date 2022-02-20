@@ -3,7 +3,7 @@
 <br/>
 
 ### 插件起源：
-去年年底在wanandroid每日一问：[如何构造一个 hide interface 的实现类？](https://www.wanandroid.com/wenda/show/20867)问题中，*残页*同学的回答说，可以通过stub + compileOnly的方式用动态代理实现访问权限是package的接口。
+去年年底在wanandroid每日一问：[如何构造一个 hide interface 的实现类？](https://www.wanandroid.com/wenda/show/20867)问题中，***残页***同学的回答说，可以通过stub + compileOnly的方式用动态代理实现访问权限是package的接口。
 
 我当时就想：用stub+动态代理还是有点麻烦，不是有个叫dexmaker的库可以在运行时动态生成dex吗？不知道能不能直接实现一个hidden的interface？
 
@@ -83,6 +83,18 @@
 
 *TABLESWITCH*、*LOOKUPSWITCH*（dexmaker没有提供相关api）
 
+<br/>
+
+**坑：**
+
+对了，这里还有个dexmaker的坑，就是if语句 `if(a >= b)`，当a=0时，在生成dex之后，a和b的顺序会反过来，也就是变成了 `if(b >= 0)`。 提了issue一周没人回答，才发现dexmaker在去年2月份就停止了更新！坑啊！！！
+
+<br/>
+
+**后续计划：**
+ - 优化转换结果显示方式；
+
+ - 加入直接查看生成的dex文件的smali以及转成class后的代码；
 
 <br/>
 
