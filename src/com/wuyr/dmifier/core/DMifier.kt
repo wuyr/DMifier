@@ -5,12 +5,14 @@ import org.objectweb.asm.util.Printer
 import java.lang.reflect.Modifier
 import java.util.*
 
-class DMifier : Printer(Opcodes.ASM9) {
+class DMifier : Printer(589824) {
 
     private fun StringBuilder.newLine() = append("\n")
 
+    private var superTypeId = ""
+
     override fun visit(
-        version: Int, access: Int, name: String?, signature: String?, superName: String, interfaces: Array<out String>
+            version: Int, access: Int, name: String?, signature: String?, superName: String, interfaces: Array<out String>
     ) {
         appendCodeBlockAndAdd {
             append("TypeId classId = ")
@@ -43,7 +45,8 @@ class DMifier : Printer(Opcodes.ASM9) {
             append("dexMaker.declare(classId, fileName, ")
             append((access or ACCESS_CLASS).accessFlag)
             append(", ")
-            append(superName.typeId)
+            superTypeId = superName.typeId
+            append(superTypeId)
             append(", interfacesTypes);")
             newLine()
         }
@@ -137,10 +140,11 @@ class DMifier : Printer(Opcodes.ASM9) {
     }
 
     private var currentMethodParameters = emptyList<String>()
+    private var currentMethodReturnType = ""
     private var isStaticMethod = false
 
     override fun visitMethod(
-        access: Int, name: String, descriptor: String, signature: String?, exceptions: Array<out String>?
+            access: Int, name: String, descriptor: String, signature: String?, exceptions: Array<out String>?
     ): Printer {
         appendCodeBlockAndAdd {
             newLine()
@@ -149,6 +153,7 @@ class DMifier : Printer(Opcodes.ASM9) {
             val parameters = descriptor.getParameterTypes()
             isStaticMethod = (access and Modifier.STATIC) != 0
             currentMethodParameters = parameters
+            currentMethodReturnType = descriptor.getReturnType().typeId
             localCount = currentMethodParameters.size + if (isStaticMethod) 0 else 1
             append("MethodId methodId = classId.")
             when (name) {
@@ -169,7 +174,7 @@ class DMifier : Printer(Opcodes.ASM9) {
                 }
                 else -> {
                     append("getMethod(")
-                    append(descriptor.getReturnType().typeId)
+                    append(currentMethodReturnType)
                     append(", \"")
                     append(name)
                     if (parameters.isEmpty()) {
@@ -278,38 +283,7 @@ class DMifier : Printer(Opcodes.ASM9) {
     }
 
     override fun visitClassEnd() {
-//        appendCodeBlockAndAdd {
-//            newLine()
-//            append("byte[] codeData = dexMaker.generate();")
-//            newLine()
-//            append("// write to file")
-//            newLine()
-//            append("// FIXME: modify output path")
-//            newLine()
-//            append("File outputFile = null;")
-//            newLine()
-//            append("FileOutputStream fos = new FileOutputStream(outputFile);")
-//            newLine()
-//            append("fos.write(codeData);")
-//            newLine()
-//            append("fos.flush();")
-//            newLine()
-//            append("fos.close();")
-//            newLine()
-//            newLine()
-//            append("// load directly")
-//            newLine()
-//            append("// FIXME: complete classLoader and dexFilePath")
-//            newLine()
-//            append("ClassLoader parentClassLoader = null;")
-//            newLine()
-//            append("File dexFilePath = null;")
-//            newLine()
-//            append("ClassLoader loader = dexMaker.generateAndLoad(parentClassLoader, dexFilePath);")
-//            newLine()
-//            append("Class<?> generatedClass = loader.loadClass(classId.getName().substring(1, classId.getName().length() - 1));")
-//            newLine()
-//        }
+
     }
 
     override fun visitEnum(name: String?, descriptor: String?, value: String?) {
@@ -402,15 +376,30 @@ class DMifier : Printer(Opcodes.ASM9) {
     private var tempLocalCount = 0
     private val localNames = HashMap<String, Pair<String, String>>()
 
-    private fun newLocalName(typeId: String, store: Boolean = false) =
-        (if (store) "local${localCount++}" else "tempLocal${tempLocalCount++}").also { name ->
-            if (store) {
-                if (typeId == "TypeId.LONG" || typeId == "TypeId.DOUBLE") {
-                    localCount++
+    private fun newLocalName(typeId: String, store: Boolean = false, conflictLocal: String? = null) =
+            if (store && conflictLocal != null) {
+                var currentConflictLocal = conflictLocal!!
+                do {
+                    currentConflictLocal = "${currentConflictLocal}_append"
+                } while (localNames.containsKey(currentConflictLocal))
+                localNames[currentConflictLocal] = currentConflictLocal to typeId
+                currentConflictLocal
+            } else (if (store) "local${localCount++}" else "tempLocal${tempLocalCount++}").also { name ->
+                if (store) {
+                    if (typeId == "TypeId.LONG" || typeId == "TypeId.DOUBLE") {
+                        localCount++
+                    }
+                    localNames[name] = name to typeId
                 }
-                localNames[name] = name to typeId
             }
+
+    private fun getLocalName(index: Int): Pair<String, String>? {
+        var localName = "local$index"
+        while (localNames.containsKey("${localName}_append")) {
+            localName = "${localName}_append"
         }
+        return localNames[localName]
+    }
 
     private fun cast(targetType: String) {
         val typeId = targetType.typeId
@@ -635,6 +624,9 @@ class DMifier : Printer(Opcodes.ASM9) {
 
             Opcodes.IRETURN, Opcodes.LRETURN, Opcodes.FRETURN, Opcodes.DRETURN, Opcodes.ARETURN -> {
                 appendOperationCodeBlock {
+                    if (stack.peek().second != currentMethodReturnType) {
+                        stack.push(store(currentMethodReturnType) to currentMethodReturnType)
+                    }
                     append("methodCodeBlock.returnValue(")
                     append(stack.pop().first)
                     append(");")
@@ -648,26 +640,13 @@ class DMifier : Printer(Opcodes.ASM9) {
                     stack.clear()
                 }
             }
-
+            Opcodes.POP -> {
+                stack.pop()
+            }
             Opcodes.DUP -> {
                 if (!pendingNewInstance) {
                     stack.push(stack.peek())
                 }
-            }
-            Opcodes.DUP_X1 -> {
-                println("DUP_X1")
-            }
-            Opcodes.DUP_X2 -> {
-                println("DUP_X2")
-            }
-            Opcodes.DUP2 -> {
-                println("DUP2")
-            }
-            Opcodes.DUP2_X1 -> {
-                println("DUP2_X1")
-            }
-            Opcodes.DUP2_X2 -> {
-                println("DUP2_X2")
             }
             Opcodes.MONITORENTER -> {
                 appendOperationCodeBlock {
@@ -754,17 +733,32 @@ class DMifier : Printer(Opcodes.ASM9) {
                         stack.push("methodCodeBlock.getParameter($realIndex, $typeId)" to typeId)
                     }
                 } else {
-                    stack.push(localNames["local$index"])
+                    stack.push(getLocalName(index))
                 }
             }
             Opcodes.ISTORE, Opcodes.LSTORE, Opcodes.FSTORE, Opcodes.DSTORE, Opcodes.ASTORE -> {
-                store(stack.peek().second, localNames["local$index"]?.first)
+                val currentTypeId = stack.peek().second
+                getLocalName(index)?.let { (targetLocal, targetTypeId) ->
+                    if (currentTypeId == targetTypeId) {
+                        store(currentTypeId, targetLocal)
+                    } else {
+                        store(currentTypeId, newLocalName(currentTypeId, true, targetLocal).also {
+                            appendDeclarationCodeBlock {
+                                append("Local ")
+                                append(it)
+                                append(" = methodCodeBlock.newLocal(")
+                                append(currentTypeId)
+                                append(");")
+                            }
+                        })
+                    }
+                } ?: store(currentTypeId)
             }
         }
 
     }
 
-    private fun store(typeId: String, target: String? = null) {
+    private fun store(typeId: String, target: String? = null): String {
         val output = target ?: run {
             newLocalName(typeId, true).also {
                 appendDeclarationCodeBlock {
@@ -783,6 +777,7 @@ class DMifier : Printer(Opcodes.ASM9) {
             append(stack.pop().first)
             append(");")
         }
+        return output
     }
 
     private var pendingNewInstance = false
@@ -913,7 +908,7 @@ class DMifier : Printer(Opcodes.ASM9) {
     }
 
     override fun visitInvokeDynamicInsn(
-        name: String?, descriptor: String?, bootstrapMethodHandle: Handle?, vararg bootstrapMethodArguments: Any?
+            name: String?, descriptor: String?, bootstrapMethodHandle: Handle?, vararg bootstrapMethodArguments: Any?
     ) {
         //FIXME: 不支持INVOKE DYNAMIC
     }
@@ -924,15 +919,15 @@ class DMifier : Printer(Opcodes.ASM9) {
                 appendOperationCodeBlock {
                     append("methodCodeBlock.compareZ(")
                     append(
-                        when (opcode) {
-                            Opcodes.IFEQ -> "Comparison.EQ"
-                            Opcodes.IFNE -> "Comparison.NE"
-                            Opcodes.IFLT -> "Comparison.LT"
-                            Opcodes.IFGE -> "Comparison.GE"
-                            Opcodes.IFGT -> "Comparison.GT"
-                            Opcodes.IFLE -> "Comparison.LE"
-                            else -> ""
-                        }
+                            when (opcode) {
+                                Opcodes.IFEQ -> "Comparison.EQ"
+                                Opcodes.IFNE -> "Comparison.NE"
+                                Opcodes.IFLT -> "Comparison.LT"
+                                Opcodes.IFGE -> "Comparison.GE"
+                                Opcodes.IFGT -> "Comparison.GT"
+                                Opcodes.IFLE -> "Comparison.LE"
+                                else -> ""
+                            }
                     )
                     append(", ")
                     append(label)
@@ -946,15 +941,15 @@ class DMifier : Printer(Opcodes.ASM9) {
                 appendOperationCodeBlock {
                     append("methodCodeBlock.compare(")
                     append(
-                        when (opcode) {
-                            Opcodes.IF_ICMPEQ, Opcodes.IF_ACMPEQ -> "Comparison.EQ"
-                            Opcodes.IF_ICMPNE, Opcodes.IF_ACMPNE -> "Comparison.NE"
-                            Opcodes.IF_ICMPLT -> "Comparison.LT"
-                            Opcodes.IF_ICMPGE -> "Comparison.GE"
-                            Opcodes.IF_ICMPGT -> "Comparison.GT"
-                            Opcodes.IF_ICMPLE -> "Comparison.LE"
-                            else -> ""
-                        }
+                            when (opcode) {
+                                Opcodes.IF_ICMPEQ, Opcodes.IF_ACMPEQ -> "Comparison.EQ"
+                                Opcodes.IF_ICMPNE, Opcodes.IF_ACMPNE -> "Comparison.NE"
+                                Opcodes.IF_ICMPLT -> "Comparison.LT"
+                                Opcodes.IF_ICMPGE -> "Comparison.GE"
+                                Opcodes.IF_ICMPGT -> "Comparison.GT"
+                                Opcodes.IF_ICMPLE -> "Comparison.LE"
+                                else -> ""
+                            }
                     )
                     append(", ")
                     append(label)
@@ -1017,7 +1012,7 @@ class DMifier : Printer(Opcodes.ASM9) {
     }
 
     override fun visitIincInsn(value: Int, increment: Int) {
-        val output = localNames["local$value"]?.first ?: return
+        val output = getLocalName(value)?.first ?: return
         loadConstant("I", increment)
         appendOperationCodeBlock {
             append("methodCodeBlock.op(")
@@ -1051,17 +1046,17 @@ class DMifier : Printer(Opcodes.ASM9) {
     }
 
     override fun visitTryCatchBlock(start: Label, end: Label, handler: Label, type: String) {
-        appendOperationCodeBlock {
-            append("methodCodeBlock.addCatchClause(")
-            append(type.typeId)
-            append(", ")
-            append(handler)
-            append(");")
-        }
+//        appendOperationCodeBlock {
+//            append("methodCodeBlock.addCatchClause(")
+//            append(type.typeId)
+//            append(", ")
+//            append(handler)
+//            append(");")
+//        }
     }
 
     override fun visitLocalVariable(
-        name: String?, descriptor: String?, signature: String?, start: Label?, end: Label?, index: Int
+            name: String?, descriptor: String?, signature: String?, start: Label?, end: Label?, index: Int
     ) {
 
     }
@@ -1107,21 +1102,13 @@ class DMifier : Printer(Opcodes.ASM9) {
     }
 
     override fun visitClassTypeAnnotation(
-        typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
+            typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
     ): Printer {
         return this
     }
 
     override fun visitNestMember(nestMember: String?) {
 
-    }
-
-    override fun visitPermittedSubclass(permittedSubclass: String?) {
-
-    }
-
-    override fun visitRecordComponent(name: String?, descriptor: String?, signature: String?): Printer {
-        return this
     }
 
     override fun visitMainClass(mainClass: String?) {
@@ -1148,24 +1135,8 @@ class DMifier : Printer(Opcodes.ASM9) {
     override fun visitModuleEnd() {
     }
 
-    override fun visitRecordComponentAnnotation(descriptor: String?, visible: Boolean): Printer {
-        return this
-    }
-
-    override fun visitRecordComponentTypeAnnotation(
-        typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
-    ): Printer {
-        return this
-    }
-
-    override fun visitRecordComponentAttribute(attribute: Attribute?) {
-    }
-
-    override fun visitRecordComponentEnd() {
-    }
-
     override fun visitFieldTypeAnnotation(
-        typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
+            typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
     ): Printer {
         return this
     }
@@ -1174,7 +1145,7 @@ class DMifier : Printer(Opcodes.ASM9) {
     }
 
     override fun visitMethodTypeAnnotation(
-        typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
+            typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
     ): Printer {
         return this
     }
@@ -1184,7 +1155,7 @@ class DMifier : Printer(Opcodes.ASM9) {
     }
 
     override fun visitMethodInsn(
-        opcode: Int, owner: String, name: String, descriptor: String, isInterface: Boolean
+            opcode: Int, owner: String, name: String, descriptor: String, isInterface: Boolean
     ) {
         val returnType = descriptor.getReturnType()
         val returnTypeId = returnType.typeId
@@ -1238,7 +1209,9 @@ class DMifier : Printer(Opcodes.ASM9) {
             append("methodCodeBlock.")
             when (opcode) {
                 Opcodes.INVOKEVIRTUAL -> append("invokeVirtual(")
-                Opcodes.INVOKESPECIAL -> append("invokeDirect(")
+                Opcodes.INVOKESPECIAL -> append(
+                        if (methodId.startsWith(superTypeId) && !methodId.contains("<init>")) "invokeSuper(" else "invokeDirect("
+                )
                 Opcodes.INVOKESTATIC -> append("invokeStatic(")
                 Opcodes.INVOKEINTERFACE -> append("invokeInterface(")
             }
@@ -1264,20 +1237,20 @@ class DMifier : Printer(Opcodes.ASM9) {
     }
 
     override fun visitInsnAnnotation(
-        typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
+            typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
     ): Printer {
         return this
     }
 
     override fun visitTryCatchAnnotation(
-        typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
+            typeRef: Int, typePath: TypePath?, descriptor: String?, visible: Boolean
     ): Printer {
         return this
     }
 
     override fun visitLocalVariableAnnotation(
-        typeRef: Int, typePath: TypePath?, start: Array<out Label>?,
-        end: Array<out Label>?, index: IntArray?, descriptor: String?, visible: Boolean
+            typeRef: Int, typePath: TypePath?, start: Array<out Label>?,
+            end: Array<out Label>?, index: IntArray?, descriptor: String?, visible: Boolean
     ): Printer {
         return this
     }
