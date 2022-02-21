@@ -1,4 +1,4 @@
-## 一款能将Java源码转成[dexmaker](https://github.com/linkedin/dexmaker)代码的DIEA插件，方便开发和测试
+## 一款能将Java源码转成[dexmaker](https://github.com/linkedin/dexmaker)代码的IDEA插件，方便开发和测试
 
 <br/>
 
